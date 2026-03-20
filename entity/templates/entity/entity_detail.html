@@ -1,0 +1,45 @@
+{% extends "entity/base.html" %}
+
+{% block content %}
+<h1>{{ entity.true_name }}</h1>
+
+<p><strong>ID:</strong> {{ entity.pk }}</p>
+<p><strong>Created:</strong> {{ entity.date_created }}</p>
+<p><strong>access visibility:</strong> {{ entity.get_visibility_display }}</p>
+
+{% if entity.basic_data_file_path %}
+<p>
+    <strong>File:</strong>
+    <a href="{{ entity.basic_data_file_path.url }}">Download</a>
+</p>
+{% endif %}
+
+<p>
+    <a href="{% url 'entity:web-entity-edit' entity.pk %}">Edit</a> |
+    <a href="{% url 'entity:web-entity-members' entity.pk %}">Manage Members</a>
+</p>
+
+<h2>Members</h2>
+<table>
+    <thead>
+        <tr>
+            <th>User</th>
+            <th>Role</th>
+            <th>Joined</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for membership in memberships %}
+        <tr>
+            <td>{{ membership.user.username }}</td>
+            <td>{{ membership.role }}</td>
+            <td>{{ membership.date_joined }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="3">No members found.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

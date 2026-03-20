@@ -1,0 +1,28 @@
+{% extends "entity/base.html" %}
+
+{% block content %}
+<h1>Entities</h1>
+
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Date Created</th>
+            <th>Open</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for entity in entities %}
+        <tr>
+            <td>{{ entity.true_name }}</td>
+            <td>{{ entity.date_created }}</td>
+            <td><a href="{% url 'entity:web-entity-detail' entity.pk %}">View</a></td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="3">No entities found.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

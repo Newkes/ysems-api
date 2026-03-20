@@ -1,0 +1,42 @@
+{% extends "entity/base.html" %}
+
+{% block content %}
+<h1>Manage Members for {{ entity.true_name }}</h1>
+
+<h2>Add Member</h2>
+<form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Add Member</button>
+</form>
+
+<h2>Current Members</h2>
+<table>
+    <thead>
+        <tr>
+            <th>User</th>
+            <th>Role</th>
+            <th>Joined</th>
+            <th>Remove</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for membership in memberships %}
+            <tr>
+                <td>{{ membership.user.username }}</td>
+                <td>{{ membership.role }}</td>
+                <td>{{ membership.date_joined }}</td>
+                <td>
+                    <a href="{% url 'entity:web-entity-member-remove' entity.pk membership.pk %}">
+                        Remove
+                    </a>
+                </td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="4">No members found.</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
