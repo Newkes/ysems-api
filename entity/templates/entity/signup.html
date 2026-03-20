@@ -1,0 +1,16 @@
+{% extends "entity/base.html" %}
+
+{% block content %}
+<h1>Sign Up</h1>
+
+<form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Create Account</button>
+</form>
+
+<p>
+    Already have an account?
+    <a href="{% url 'entity:login' %}">Login</a>
+</p>
+{% endblock %}

@@ -1,17 +1,19 @@
 from django.contrib import messages
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model,login
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect
-from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView
+from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView, FormView
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from .forms import EntityForm, MembershipForm
+from .forms import EntityForm, MembershipForm, SignupForm   
 from .models import Entity, EntityMembership
 from .permissions import CanEditEntity, CanViewEntity, IsEntityOwner, user_role_for_entity
 from .serializers import (
@@ -20,14 +22,15 @@ from .serializers import (
     EntitySerializer,
     MembershipCreateSerializer,
     MembershipUpdateSerializer,
+    SignupSerializer,
 )
 
 User = get_user_model()
 
 
-# -------------------------
-# API VIEWS
-# -------------------------
+
+# API
+
 
 class EntityViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -170,10 +173,39 @@ class EntityViewSet(viewsets.ModelViewSet):
         membership.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+class SignupAPIView(APIView):
+    permission_classes = [AllowAny]
 
-# -------------------------
+    def post(self, request):
+        serializer = SignupSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = serializer.save()
+
+        user = result["user"]
+        entity = result["entity"]
+
+        return Response(
+            {
+                "message": "Account created successfully.",
+                "user": {
+                    "id": str(user.id),
+                    "username": user.username,
+                    "email": user.email,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                },
+                "entity": {
+                    "id": str(entity.id),
+                    "true_name": entity.true_name,
+                },
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+
 # WEB / TEMPLATE VIEWS
-# -------------------------
+
 
 class HomeView(LoginRequiredMixin, TemplateView):
     template_name = "entity/home.html"
@@ -343,3 +375,45 @@ def remove_membership_page_view(request, pk, member_id):
     membership.delete()
     messages.success(request, "Member removed successfully.")
     return redirect("entity:web-entity-members", pk=entity.pk)
+
+
+class SignupPageView(FormView):
+    template_name = "entity/signup.html"
+    form_class = SignupForm
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated:
+            return redirect("entity:web-entity-list")
+        return super().dispatch(request, *args, **kwargs)
+
+    @transaction.atomic
+    def form_valid(self, form):
+        username = form.cleaned_data["username"]
+        email = form.cleaned_data.get("email", "")
+        first_name = form.cleaned_data.get("first_name", "")
+        last_name = form.cleaned_data.get("last_name", "")
+        true_name = form.cleaned_data.get("true_name", "").strip()
+        password = form.cleaned_data["password1"]
+
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password,
+            first_name=first_name,
+            last_name=last_name,
+        )
+
+        entity_name = true_name or " ".join(
+            part for part in [first_name, last_name] if part
+        ).strip() or username
+
+        entity = Entity.objects.create(true_name=entity_name)
+
+        EntityMembership.objects.create(
+            user=user,
+            entity=entity,
+            role="OWNER",
+        )
+
+        login(self.request, user)
+        return redirect("entity:web-entity-list")

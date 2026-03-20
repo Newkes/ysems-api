@@ -40,7 +40,7 @@
         <a href="{% url 'entity:web-entity-list' %}">Entities</a>
         <a href="{% url 'entity:web-entity-create' %}">Create Entity</a>
         <a href="/api/entities/">API</a>
-       
+
 
         {% if user.is_authenticated %}
         <form method="post" action="{% url 'entity:logout' %}" style="display:inline;">
@@ -49,6 +49,7 @@
         </form>
         {% else %}
         <a href="{% url 'entity:login' %}">Login</a>
+        <a href="{% url 'entity:signup' %}">Sign Up</a>
         {% endif %}
     </nav>
 
