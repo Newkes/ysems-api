@@ -81,17 +81,13 @@ WSGI_APPLICATION = 'YSEMS.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+import os
+
 DATABASES = {
-    'default': {
-        'ENGINE': 'django_mongodb_backend',
-        'NAME': 'connectly_dtbs',
-        'CLIENT': {
-            'host': 'mongodb://localhost:27017/',
-#            'host': 'localhost',
- #           'port': 27017,
-        },
-       
-        
+    "default": {
+        "ENGINE": "django_mongodb_backend",
+        "NAME": "ysems",
+        "HOST": os.environ.get("MONGODB_URI"),
     }
 }
 
