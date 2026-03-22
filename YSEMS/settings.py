@@ -1,5 +1,7 @@
 import django_mongodb_backend.fields
 from django.db import models
+import os
+
 
 # force Django to treat AutoField as a MongoDB ObjectId globally
 models.AutoField = django_mongodb_backend.fields.ObjectIdAutoField
@@ -44,7 +46,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-     "rest_framework",
+    'rest_framework',
+    'rest_framework.authtoken',
     'entity',
 ]
 
@@ -59,6 +62,13 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'YSEMS.urls'
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.TokenAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+}
 
 TEMPLATES = [
     {
@@ -81,7 +91,22 @@ WSGI_APPLICATION = 'YSEMS.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-import os
+
+# external file storage to be added later
+
+FILE_STORAGE_BACKEND = os.environ.get("FILE_STORAGE_BACKEND", "LOCAL")
+
+GDRIVE_ENABLED = os.environ.get("GDRIVE_ENABLED", "false").lower() == "true"
+GDRIVE_CLIENT_ID = os.environ.get("GDRIVE_CLIENT_ID", "")
+GDRIVE_CLIENT_SECRET = os.environ.get("GDRIVE_CLIENT_SECRET", "")
+GDRIVE_REFRESH_TOKEN = os.environ.get("GDRIVE_REFRESH_TOKEN", "")
+GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID", "")
+GDRIVE_SERVICE_ACCOUNT_FILE = os.environ.get("GDRIVE_SERVICE_ACCOUNT_FILE", "")
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'data' / 'media'
+
+
 
 DATABASES = {
     "default": {
@@ -134,8 +159,6 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django_mongodb_backend.fields.ObjectIdAutoField'
 
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'data' / 'media'
 
 LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/entities/"

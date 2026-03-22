@@ -1,5 +1,5 @@
 from django.contrib import messages
-from django.contrib.auth import get_user_model,login
+from django.contrib.auth import get_user_model,login, logout , authenticate
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
 from django.http import HttpResponseForbidden
@@ -7,15 +7,18 @@ from django.shortcuts import get_object_or_404, redirect
 from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView, FormView
 
 from rest_framework import status, viewsets
+from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.parsers import FormParser, MultiPartParser , JSONParser
 
 from .forms import EntityForm, MembershipForm, SignupForm   
 from .models import Entity, EntityMembership
 from .permissions import CanEditEntity, CanViewEntity, IsEntityOwner, user_role_for_entity
+from .storage_service import get_storage_service
 from .serializers import (
     EntityCreateUpdateSerializer,
     EntityMembershipReadSerializer,
@@ -34,6 +37,7 @@ User = get_user_model()
 
 class EntityViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
         return (
@@ -173,6 +177,78 @@ class EntityViewSet(viewsets.ModelViewSet):
         membership.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+class LoginAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        username = request.data.get("username", "").strip()
+        password = request.data.get("password", "")
+
+        if not username or not password:
+            return Response(
+                {"detail": "Username and password are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = authenticate(request, username=username, password=password)
+
+        if user is None:
+            return Response(
+                {"detail": "Invalid credentials."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        login(request, user)
+        token, _ = Token.objects.get_or_create(user=user)
+
+        memberships = (
+            EntityMembership.objects
+            .filter(user=user)
+            .select_related("entity")
+            .order_by("date_joined")
+        )
+
+        entities_data = [
+            {
+                "id": str(m.entity.id),
+                "true_name": m.entity.true_name,
+                "role": m.role,
+            }
+            for m in memberships
+        ]
+
+        return Response(
+            {
+                "message": "Login successful.",
+                "token": token.key,
+                "user": {
+                    "id": str(user.id),
+                    "username": user.username,
+                    "email": user.email,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                },
+                "entities": entities_data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class LogoutAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        token = getattr(request, "auth", None)
+        if token:
+            token.delete()
+
+        logout(request)
+
+        return Response(
+            {"message": "Logout successful."},
+            status=status.HTTP_200_OK,
+        )
+
 class SignupAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -183,10 +259,12 @@ class SignupAPIView(APIView):
 
         user = result["user"]
         entity = result["entity"]
+        token, _ = Token.objects.get_or_create(user=user)
 
         return Response(
             {
                 "message": "Account created successfully.",
+                "token": token.key,
                 "user": {
                     "id": str(user.id),
                     "username": user.username,
@@ -417,3 +495,5 @@ class SignupPageView(FormView):
 
         login(self.request, user)
         return redirect("entity:web-entity-list")
+
+   

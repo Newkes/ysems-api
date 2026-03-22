@@ -26,6 +26,7 @@ class EntityMembershipReadSerializer(serializers.ModelSerializer):
 
 class EntitySerializer(serializers.ModelSerializer):
     id = serializers.CharField(read_only=True)
+    file_url = serializers.SerializerMethodField()
     memberships = serializers.SerializerMethodField()
 
     class Meta:
@@ -33,19 +34,41 @@ class EntitySerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "true_name",
+            "visibility",
             "date_created",
             "basic_data_file_path",
+            "storage_backend",
+            "external_file_id",
+            "external_file_url",
+            "file_url",
             "memberships",
         ]
-        read_only_fields = ["id", "date_created", "memberships"]
+        read_only_fields = [
+            "id",
+            "date_created",
+            "storage_backend",
+            "external_file_id",
+            "external_file_url",
+            "file_url",
+            "memberships",
+        ]
+
+    def get_file_url(self, obj):
+            request = self.context.get("request")
+            url = obj.resolved_file_url
+            if not url:
+                return None
+            if request and url.startswith("/"):
+                return request.build_absolute_uri(url)
+            return url
 
     def get_memberships(self, obj):
-        memberships = (
+            memberships = (
             EntityMembership.objects
             .filter(entity=obj)
             .order_by("date_joined")
-        )
-        return EntityMembershipReadSerializer(memberships, many=True).data
+            )
+            return EntityMembershipReadSerializer(memberships, many=True).data
 
 
 class EntityCreateUpdateSerializer(serializers.ModelSerializer):
@@ -53,7 +76,7 @@ class EntityCreateUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Entity
-        fields = ["id", "true_name", "basic_data_file_path"]
+        fields = ["id", "true_name", "visibility", "basic_data_file_path"]
         read_only_fields = ["id"]
 
 
@@ -73,6 +96,49 @@ class MembershipUpdateSerializer(serializers.Serializer):
     role = serializers.ChoiceField(
         choices=[choice[0] for choice in EntityMembership.ROLE_CHOICES]
     )
+class LoginSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=150)
+    password = serializers.CharField(write_only=True, min_length=8)
+   
+    def validate_username(self, value):
+        if User.objects.filter(username=value).exists()==False:
+            raise serializers.ValidationError("Username doesn't exists.")
+        return value
+
+
+    @transaction.atomic
+    def create(self, validated_data):
+        username = validated_data["username"]
+        email = validated_data.get("email", "")
+        password = validated_data["password"]
+        first_name = validated_data.get("first_name", "")
+        last_name = validated_data.get("last_name", "")
+        true_name = validated_data.get("true_name", "").strip()
+
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password,
+            first_name=first_name,
+            last_name=last_name,
+        )
+
+        entity_name = true_name or " ".join(
+            part for part in [first_name, last_name] if part
+        ).strip() or username
+
+        entity = Entity.objects.create(true_name=entity_name)
+
+        EntityMembership.objects.create(
+            user=user,
+            entity=entity,
+            role="OWNER",
+        )
+
+        return {
+            "user": user,
+            "entity": entity,
+        }
 
 class SignupSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150)
