@@ -2,6 +2,7 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model,login, logout , authenticate
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
+from django.db.models import Q
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect
 from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView, FormView
@@ -40,9 +41,23 @@ class EntityViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
+        user = self.request.user
+
+        queryset = Entity.objects.filter(is_hidden=False)
+
+        if user.is_authenticated:
+            return (
+                queryset.filter(
+                    Q(visibility="PUBLIC") |
+                    Q(visibility="REGISTERED") |
+                    Q(entitymembership__user=user)
+                )
+                .distinct()
+                .order_by("-date_created")
+            )
+
         return (
-            Entity.objects
-            .filter(entitymembership__user=self.request.user)
+            queryset.filter(visibility="PUBLIC")
             .distinct()
             .order_by("-date_created")
         )

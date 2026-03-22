@@ -15,15 +15,25 @@ def user_role_for_entity(user, entity):
 
 
 class CanViewEntity(BasePermission):
-    """
-    User must be a member of the entity to view it.
-    """
-
     def has_object_permission(self, request, view, obj):
-        return EntityMembership.objects.filter(
-            user=request.user,
-            entity=obj
-        ).exists()
+        role = user_role_for_entity(request.user, obj)
+        if role:
+            return True
+
+        if obj.is_hidden or obj.visibility == "HIDDEN":
+            return False
+
+        if obj.visibility == "PUBLIC":
+            return True
+
+        if obj.visibility == "REGISTERED":
+            return request.user.is_authenticated
+
+        if obj.visibility == "RESTRICTED":
+            return False
+
+        return False
+
 
 
 class CanEditEntity(BasePermission):
