@@ -68,6 +68,8 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.TokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
+    "DEFAULT_PAGINATION_CLASS": "entity.pagination.EntityPagination",
+    "PAGE_SIZE": 10,
 }
 
 TEMPLATES = [
@@ -115,6 +117,14 @@ DATABASES = {
         "HOST": os.environ.get("MONGODB_URI"),
     }
 }
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "ysems-api-cache",
+    }
+}
+
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators

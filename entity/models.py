@@ -39,7 +39,7 @@ class Entity(models.Model):
     external_file_id = models.CharField(max_length=255, blank=True, null=True)
     external_file_url = models.URLField(blank=True, null=True)
     
-    # This creates a "bridge" between Users and Entities
+    
     users = models.ManyToManyField(User, through='EntityMembership', related_name='accessible_entities')
     
 
@@ -69,5 +69,5 @@ class EntityMembership(models.Model):
     date_joined = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        # Prevents a user from having two different roles in the same entity
+        
         unique_together = ('user', 'entity')

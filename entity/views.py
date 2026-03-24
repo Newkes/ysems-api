@@ -1,8 +1,10 @@
 from django.contrib import messages
 from django.contrib.auth import get_user_model,login, logout , authenticate
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect
 from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView, FormView
@@ -16,6 +18,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.parsers import FormParser, MultiPartParser , JSONParser
 
+from urllib.parse import urlencode
+
+from .pagination import EntityPagination
 from .forms import EntityForm, MembershipForm, SignupForm   
 from .models import Entity, EntityMembership
 from .permissions import CanEditEntity, CanViewEntity, IsEntityOwner, user_role_for_entity
@@ -38,29 +43,101 @@ User = get_user_model()
 
 class EntityViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    parser_classes = [MultiPartParser, FormParser]
+    pagination_class = EntityPagination
+
+    LIST_CACHE_TIMEOUT = 60
+    MEMBERS_CACHE_TIMEOUT = 60
+
+    def _user_entities_version_key(self, user_id):
+        return f"entities:list:version:user:{user_id}"
+
+    def _entity_members_version_key(self, entity_id):
+        return f"entities:members:version:entity:{entity_id}"
+
+    def _get_user_entities_version(self, user_id):
+        return cache.get_or_set(self._user_entities_version_key(user_id), 1, None)
+
+    def _get_entity_members_version(self, entity_id):
+        return cache.get_or_set(self._entity_members_version_key(entity_id), 1, None)
+
+    def _bump_user_entities_version(self, user_id):
+        key = self._user_entities_version_key(user_id)
+        try:
+            cache.incr(key)
+        except ValueError:
+            cache.set(key, 2, None)
+
+    def _bump_entity_members_version(self, entity_id):
+        key = self._entity_members_version_key(entity_id)
+        try:
+            cache.incr(key)
+        except ValueError:
+            cache.set(key, 2, None)
+
+    def _bump_entity_list_cache_for_members(self, entity):
+        user_ids = EntityMembership.objects.filter(entity=entity).values_list("user_id", flat=True)
+        for user_id in user_ids:
+            self._bump_user_entities_version(str(user_id))
+
+    def _normalized_query_string(self, request):
+        items = []
+        for key in sorted(request.query_params.keys()):
+            values = request.query_params.getlist(key)
+            for value in values:
+                items.append((key, value))
+        return urlencode(items)
+
+    def _list_cache_key(self, request):
+        user_id = str(request.user.id)
+        version = self._get_user_entities_version(user_id)
+        query_string = self._normalized_query_string(request)
+        return f"entities:list:user:{user_id}:v:{version}:q:{query_string}"
+
+    def _members_cache_key(self, entity):
+        entity_id = str(entity.id)
+        version = self._get_entity_members_version(entity_id)
+        return f"entities:members:entity:{entity_id}:v:{version}"
+
+    def list(self, request, *args, **kwargs):
+        cache_key = self._list_cache_key(request)
+        cached_data = cache.get(cache_key)
+
+        if cached_data is not None:
+            response = Response(cached_data)
+            response["X-Cache"] = "HIT"
+            response["X-Generated-At"] = cached_data.get("generated_at", "")
+            return response
+
+        response = super().list(request, *args, **kwargs)
+
+        if response.status_code == status.HTTP_200_OK:
+            data = dict(response.data)
+            generated_at = timezone.now().isoformat()
+            data["generated_at"] = generated_at
+
+            cache.set(cache_key, data, self.LIST_CACHE_TIMEOUT)
+
+            response = Response(data, status=status.HTTP_200_OK)
+            response["X-Cache"] = "MISS"
+            response["X-Generated-At"] = generated_at
+            return response
+
+        return response
 
     def get_queryset(self):
-        user = self.request.user
+        qs = Entity.objects.all().distinct().order_by("-date_created")
 
-        queryset = Entity.objects.filter(is_hidden=False)
+        if not self.request.user.is_authenticated:
+            return qs.filter(visibility="PUBLIC")
 
-        if user.is_authenticated:
-            return (
-                queryset.filter(
-                    Q(visibility="PUBLIC") |
-                    Q(visibility="REGISTERED") |
-                    Q(entitymembership__user=user)
-                )
-                .distinct()
-                .order_by("-date_created")
-            )
-
-        return (
-            queryset.filter(visibility="PUBLIC")
-            .distinct()
-            .order_by("-date_created")
-        )
+        return qs.filter(
+            Q(visibility="PUBLIC") |
+            Q(visibility="REGISTERED") |
+            Q(visibility="RESTRICTED") |
+            Q(visibility="HIDDEN") |
+            Q(entitymembership__user=self.request.user)
+        ).distinct()
 
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:
@@ -102,6 +179,8 @@ class EntityViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         entity = self.perform_create(serializer)
 
+        self._bump_user_entities_version(str(request.user.id))
+
         output = EntitySerializer(entity, context={"request": request})
         return Response(output.data, status=status.HTTP_201_CREATED)
 
@@ -110,12 +189,18 @@ class EntityViewSet(viewsets.ModelViewSet):
         entity = self.get_object()
 
         if request.method.lower() == "get":
+            cache_key = self._members_cache_key(entity)
+            cached_data = cache.get(cache_key)
+            if cached_data is not None:
+                return Response(cached_data)
+
             memberships = (
                 EntityMembership.objects
                 .filter(entity=entity)
                 .order_by("date_joined")
             )
             data = EntityMembershipReadSerializer(memberships, many=True).data
+            cache.set(cache_key, data, self.MEMBERS_CACHE_TIMEOUT)
             return Response(data)
 
         serializer = MembershipCreateSerializer(data=request.data)
@@ -135,6 +220,10 @@ class EntityViewSet(viewsets.ModelViewSet):
             user=user,
             role=role,
         )
+
+        self._bump_entity_members_version(str(entity.id))
+        self._bump_entity_list_cache_for_members(entity)
+        self._bump_user_entities_version(str(user.id))
 
         output = EntityMembershipReadSerializer(membership)
         return Response(output.data, status=status.HTTP_201_CREATED)
@@ -159,6 +248,9 @@ class EntityViewSet(viewsets.ModelViewSet):
 
         membership.role = serializer.validated_data["role"]
         membership.save(update_fields=["role"])
+
+        self._bump_entity_members_version(str(entity.id))
+        self._bump_entity_list_cache_for_members(entity)
 
         output = EntityMembershipReadSerializer(membership)
         return Response(output.data, status=status.HTTP_200_OK)
@@ -189,10 +281,32 @@ class EntityViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+        removed_user_id = str(membership.user_id)
         membership.delete()
+
+        self._bump_entity_members_version(str(entity.id))
+        self._bump_entity_list_cache_for_members(entity)
+        self._bump_user_entities_version(removed_user_id)
+
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    def perform_update(self, serializer):
+        entity = serializer.save()
+        self._bump_entity_members_version(str(entity.id))
+        self._bump_entity_list_cache_for_members(entity)
+        return entity
+
+    def perform_destroy(self, instance):
+        member_user_ids = [str(user_id) for user_id in EntityMembership.objects.filter(entity=instance).values_list("user_id", flat=True)]
+        entity_id = str(instance.id)
+        instance.delete()
+
+        cache.delete(self._entity_members_version_key(entity_id))
+        for user_id in member_user_ids:
+            self._bump_user_entities_version(user_id)
+
 class LoginAPIView(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
 
     def post(self, request):
