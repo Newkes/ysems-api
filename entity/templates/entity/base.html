@@ -4,13 +4,66 @@
     <meta charset="utf-8">
     <title>YSEMS</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 2rem;
+        html, body {
+            height: 100%;
         }
 
-        nav a {
-            margin-right: 1rem;
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+        }
+
+        nav {
+            padding: 1rem 2rem;
+            border-bottom: 1px solid #ccc;
+            background: #f8f8f8;
+        }
+
+            nav a {
+                margin-right: 1rem;
+            }
+
+        .messages {
+            margin: 1rem 2rem 0 2rem;
+            padding: 0;
+        }
+
+            .messages li {
+                margin-bottom: 0.5rem;
+                list-style: none;
+            }
+
+        .content {
+            display: flex;
+            flex-direction: row;
+            gap: 1rem;
+            padding: 1rem 2rem;
+            box-sizing: border-box;
+            align-items: flex-start;
+        }
+
+        .left_panel {
+            flex: 1;
+            min-width: 0;
+            border: 1px solid #ccc;
+            padding: 1rem;
+            box-sizing: border-box;
+            background: #fff;
+        }
+
+        .right_panel {
+            width: 32%;
+            min-width: 280px;
+            max-width: 420px;
+            border: 1px solid #ccc;
+            padding: 1rem;
+            box-sizing: border-box;
+            background: #fff;
+            overflow-y: auto;
+            overflow-x: auto;
+            position: sticky;
+            top: 1rem;
+            max-height: calc(100vh - 120px);
         }
 
         table {
@@ -23,24 +76,32 @@
             border: 1px solid #ccc;
             padding: 0.5rem;
             text-align: left;
+            vertical-align: top;
         }
 
-        .messages {
-            margin: 1rem 0;
-        }
-
-            .messages li {
-                margin-bottom: 0.5rem;
+        @media (max-width: 900px) {
+            .content {
+                flex-direction: column;
             }
+
+            .left_panel,
+            .right_panel {
+                width: 100%;
+                min-width: 0;
+                max-width: none;
+                position: static;
+                max-height: none;
+            }
+        }
     </style>
 </head>
 <body>
     <nav>
+        {% if request.resolver_match.url_name != 'login' and request.resolver_match.url_name != 'signup' %}
         <a href="{% url 'entity:home' %}">Home</a>
-        <a href="{% url 'entity:web-entity-list' %}">Entities</a>
         <a href="{% url 'entity:web-entity-create' %}">Create Entity</a>
         <a href="/api/entities/">API</a>
-
+        {% endif %}
 
         {% if user.is_authenticated %}
         <form method="post" action="{% url 'entity:logout' %}" style="display:inline;">
@@ -52,15 +113,26 @@
         <a href="{% url 'entity:signup' %}">Sign Up</a>
         {% endif %}
     </nav>
+    <div class=" content">
+        {% if messages %}
+        <ul class="messages">
+            {% for message in messages %}
+            <li>{{ message }}</li>
+            
+            {% endfor %}
+        </ul>
+        {% endif %}
+        <div class="left_panel">
+           
+            {% block content %}{% endblock %}
+        </div>
+        {% if request.resolver_match.url_name != 'login' and request.resolver_match.url_name != 'signup' %}
+        <div class="right_panel">
+            {% include "entity/entity_list.html"%}
+        </div>
+        {% endif %}
 
-    {% if messages %}
-    <ul class="messages">
-        {% for message in messages %}
-        <li>{{ message }}</li>
-        {% endfor %}
-    </ul>
-    {% endif %}
-
-    {% block content %}{% endblock %}
+    </div>
+    
 </body>
 </html>

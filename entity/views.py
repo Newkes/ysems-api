@@ -4,10 +4,11 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Q
-from django.utils import timezone
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect
-from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView, FormView
+from django.urls import reverse_lazy
+from django.utils import timezone
+from django.views.generic import CreateView, DeleteView, DetailView, FormView, ListView, TemplateView, UpdateView  # builtin django views
 
 from rest_framework import status, viewsets
 from rest_framework.authtoken.models import Token
@@ -20,6 +21,8 @@ from rest_framework.parsers import FormParser, MultiPartParser , JSONParser
 
 from urllib.parse import urlencode
 
+
+#custom code
 from .pagination import EntityPagination
 from .forms import EntityForm, MembershipForm, SignupForm   
 from .models import Entity, EntityMembership
@@ -35,6 +38,15 @@ from .serializers import (
 )
 
 User = get_user_model()
+
+responses = {
+    "default": "You do not have permission to access this entity.",
+    "fedit": "You do not have permission to edit this entity.",
+    "fdelete": "You do not have permission to delete this entity.",
+    "fmembers": "Only owners can manage memberships.",
+}
+
+
 
 
 
@@ -414,111 +426,152 @@ class SignupAPIView(APIView):
 # WEB / TEMPLATE VIEWS
 
 
-class HomeView(LoginRequiredMixin, TemplateView):
-    template_name = "entity/home.html"
 
 
-class EntityListPageView(LoginRequiredMixin, ListView):
-    model = Entity
-    template_name = "entity/entity_list.html"
-    context_object_name = "entities"
+
+def create_entity_with_owner(user, *, true_name=None, form=None):
+    with transaction.atomic():
+        if form is not None:
+            entity = form.save()
+        else:
+            entity = Entity.objects.create(true_name=true_name)
+
+        EntityMembership.objects.create(
+            user=user,
+            entity=entity,
+            role="OWNER",
+        )
+
+    return entity
+
+class entityObjectContextMixin:
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["user_role"] = user_role_for_entity(self.request.user, self.object)
+        return context
+
+class entitymixin(LoginRequiredMixin):
+    required_roles = None
+    forbidden_message_key = "default"
+    use_member_queryset = True
+    success_message = None
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["entities"] = (
+            Entity.objects
+            .distinct()
+            .order_by("-date_created")
+        )
+        return context
 
     def get_queryset(self):
+        if self.use_member_queryset:
+            return (
+                Entity.objects
+                #.filter(entitymembership__user=self.request.user)
+                .distinct()
+            )
         return (
             Entity.objects
-            #.filter(entitymembership__user=self.request.user)
             .distinct()
             .order_by("-date_created")
         )
 
+    def dispatch(self, request, *args, **kwargs):
+        if self.required_roles is not None:
+            entity = self.get_object()
+            role = user_role_for_entity(request.user, entity)
 
-class EntityDetailPageView(LoginRequiredMixin, DetailView):
+            if role not in self.required_roles:
+                return HttpResponseForbidden(
+                    responses[self.forbidden_message_key]
+                )
+
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        if self.success_message:
+            messages.success(self.request, self.success_message)
+        return super().form_valid(form)
+
+
+class HomeView(entitymixin, TemplateView):
+    template_name = "entity/home.html"
+    use_member_queryset = False
+
+    def get_context_data(self, **kwargs):
+        context = TemplateView.get_context_data(self, **kwargs)
+        context["entities"] = (
+            Entity.objects
+            .distinct()
+            .order_by("-date_created")
+        )
+        return context
+
+
+class EntityListPageView(entitymixin, ListView):
+    model = Entity
+    template_name = "entity/entity_list.html"
+    context_object_name = "entities"
+    use_member_queryset = False
+
+
+class EntityDetailPageView(entitymixin, entityObjectContextMixin, DetailView):
     model = Entity
     template_name = "entity/entity_detail.html"
     context_object_name = "entity"
 
-    def get_queryset(self):
-        return (
-            Entity.objects
-            .filter(entitymembership__user=self.request.user)
-            .distinct()
-        )
 
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        entity = self.object
-        context["memberships"] = (
-            EntityMembership.objects
-            .filter(entity=entity)
-            .order_by("date_joined")
-        )
-        context["user_role"] = user_role_for_entity(self.request.user, entity)
-        return context
-
-
-class EntityCreatePageView(LoginRequiredMixin, CreateView):
+class EntityCreatePageView(entitymixin, CreateView):
     model = Entity
     form_class = EntityForm
     template_name = "entity/entity_form.html"
+    use_member_queryset = False
+    success_message = "Entity created successfully."
 
     def form_valid(self, form):
-        with transaction.atomic():
-            self.object = form.save()
-            EntityMembership.objects.create(
-                user=self.request.user,
-                entity=self.object,
-                role="OWNER",
-            )
-        messages.success(self.request, "Entity created successfully.")
+        self.object = create_entity_with_owner(
+            self.request.user,
+            form=form,
+        )
+        if self.success_message:
+            messages.success(self.request, self.success_message)
         return redirect("entity:web-entity-detail", pk=self.object.pk)
 
 
-class EntityUpdatePageView(LoginRequiredMixin, UpdateView):
+class EntityUpdatePageView(entitymixin, entityObjectContextMixin, UpdateView):
     model = Entity
     form_class = EntityForm
     template_name = "entity/entity_form.html"
     context_object_name = "entity"
 
-    def get_queryset(self):
-        return (
-            Entity.objects
-            .filter(entitymembership__user=self.request.user)
-            .distinct()
-        )
-
-    def dispatch(self, request, *args, **kwargs):
-        entity = self.get_object()
-        role = user_role_for_entity(request.user, entity)
-        if role not in ["OWNER", "MANAGER"]:
-            return HttpResponseForbidden("You do not have permission to edit this entity.")
-        return super().dispatch(request, *args, **kwargs)
-
-    def form_valid(self, form):
-        messages.success(self.request, "Entity updated successfully.")
-        return super().form_valid(form)
+    required_roles = ["OWNER", "MANAGER"]
+    forbidden_message_key = "fedit"
+    success_message = "Entity updated successfully."
 
     def get_success_url(self):
         return f"/entities/{self.object.pk}/"
 
 
-class EntityMembersPageView(LoginRequiredMixin, DetailView):
+class EntityDeleteView(entitymixin, entityObjectContextMixin, DeleteView):
+    model = Entity
+    template_name = "entity/entity_confirm_delete.html"
+    context_object_name = "entity"
+    success_url = reverse_lazy("entity:home")
+
+    required_roles = ["OWNER"]
+    forbidden_message_key = "fdelete"
+    success_message = "Entity deleted successfully."
+
+
+class EntityMembersPageView(entitymixin, entityObjectContextMixin, DetailView):
     model = Entity
     template_name = "entity/entity_members.html"
     context_object_name = "entity"
 
-    def get_queryset(self):
-        return (
-            Entity.objects
-            .filter(entitymembership__user=self.request.user)
-            .distinct()
-        )
-
-    def dispatch(self, request, *args, **kwargs):
-        entity = self.get_object()
-        role = user_role_for_entity(request.user, entity)
-        if role != "OWNER":
-            return HttpResponseForbidden("Only owners can manage memberships.")
-        return super().dispatch(request, *args, **kwargs)
+    required_roles = ["OWNER"]
+    forbidden_message_key = "fmembers"
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -554,44 +607,9 @@ class EntityMembersPageView(LoginRequiredMixin, DetailView):
         return self.render_to_response(context)
 
 
-def remove_membership_page_view(request, pk, member_id):
-    if not request.user.is_authenticated:
-        return redirect("/admin/login/?next=/entities/")
-
-    entity = get_object_or_404(
-        Entity.objects.filter(entitymembership__user=request.user).distinct(),
-        pk=pk,
-    )
-
-    role = user_role_for_entity(request.user, entity)
-    if role != "OWNER":
-        return HttpResponseForbidden("Only owners can remove memberships.")
-
-    membership = get_object_or_404(
-        EntityMembership,
-        pk=member_id,
-        entity=entity,
-    )
-
-    if membership.user == request.user and membership.role == "OWNER":
-        owner_count = EntityMembership.objects.filter(entity=entity, role="OWNER").count()
-        if owner_count <= 1:
-            messages.error(request, "You cannot remove the last remaining owner.")
-            return redirect("entity:web-entity-members", pk=entity.pk)
-
-    membership.delete()
-    messages.success(request, "Member removed successfully.")
-    return redirect("entity:web-entity-members", pk=entity.pk)
-
-
 class SignupPageView(FormView):
     template_name = "entity/signup.html"
     form_class = SignupForm
-
-    def dispatch(self, request, *args, **kwargs):
-        if request.user.is_authenticated:
-            return redirect("entity:web-entity-list")
-        return super().dispatch(request, *args, **kwargs)
 
     @transaction.atomic
     def form_valid(self, form):
@@ -614,15 +632,10 @@ class SignupPageView(FormView):
             part for part in [first_name, last_name] if part
         ).strip() or username
 
-        entity = Entity.objects.create(true_name=entity_name)
-
-        EntityMembership.objects.create(
-            user=user,
-            entity=entity,
-            role="OWNER",
+        create_entity_with_owner(
+            user,
+            true_name=entity_name,
         )
 
         login(self.request, user)
         return redirect("entity:web-entity-list")
-
-   

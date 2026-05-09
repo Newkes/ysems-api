@@ -1,5 +1,6 @@
 {% extends "entity/base.html" %}
 
+
 {% block content %}
 <h1>{{ entity.true_name }}</h1>
 
@@ -16,8 +17,19 @@
 
 <p>
     <a href="{% url 'entity:web-entity-edit' entity.pk %}">Edit</a> |
-    <a href="{% url 'entity:web-entity-members' entity.pk %}">Manage Members</a>
+    <!--<a href="{% url 'entity:web-entity-members' entity.pk %}">Manage Members</a>-->
+    <a href="{% url 'entity:web-entity-detail' entity.pk %}">View</a></td>
+   
+    {% if user_role == "OWNER" %}
+    <form method="post" action="{% url 'entity:web-entity-delete' entity.pk %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit">Delete</button>
+    </form>
+    {% endif %}
+
+
 </p>
+<p>Role: {{ user_role }}</p>
 
 <h2>Members</h2>
 <table>
