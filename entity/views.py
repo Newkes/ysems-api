@@ -638,4 +638,4 @@ class SignupPageView(FormView):
         )
 
         login(self.request, user)
-        return redirect("entity:web-entity-list")
+        return redirect("entity:home")
