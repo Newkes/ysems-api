@@ -1,6 +1,14 @@
 import django_mongodb_backend.fields
 from django.db import models
+from pathlib import Path
 import os
+
+import environ
+import certifi
+
+
+
+
 
 
 # force Django to treat AutoField as a MongoDB ObjectId globally
@@ -19,7 +27,6 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
-from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -36,6 +43,8 @@ DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
 
+env = environ.Env()
+environ.Env.read_env(BASE_DIR / ".env")
 
 # Application definition
 
@@ -115,6 +124,10 @@ DATABASES = {
         "ENGINE": "django_mongodb_backend",
         "NAME": "ysems",
         "HOST": os.environ.get("MONGODB_URI"),
+        "OPTIONS": {
+            "tls": True,
+            "tlsCAFile": certifi.where(),
+        },
     }
 }
 
